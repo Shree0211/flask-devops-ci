@@ -37,14 +37,14 @@ jobs:
         working-directory: ./terraform  # Adjust to where your Terraform files are located
         run: terraform init -input=false
 
-      # 6. Apply Terraform configuration to provision EC2
-      - name: Terraform Apply
+      # 6. Apply Terraformform Apply
         working-directory: ./terraform  # Same as above
         run: |
          terraform apply \
            -auto-approve \
            -input=false \
-           -var-file=ci.tfvars
+           -var-file=c configuration to provision EC2
+      - name: Terrai.tfvars
 
       # 7. Deploy Flask app to EC2 using SSH
       - name: Deploy Flask app to EC2
