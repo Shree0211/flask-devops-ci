@@ -32,9 +32,13 @@ jobs:
         working-directory: ./terraform  # Make sure to run Terraform from the right folder
         run: terraform init  # Initialize Terraform to set up the environment
 
+      - name: Terrform Plan
+        working-directory: ./terraform
+        run: terraform plan
+      
       - name: Terraform Apply
         working-directory: ./terraform
-        run: terraform apply -auto-approve  # Apply Terraform plan to provision EC2
+        run: terraform apply -auto-approve -input=false -var-file=ci.tfvars  # Apply Terraform plan to provision EC2
         
       - name: Deploy Flask App to EC2
         uses: appleboy/ssh-action@v0.1.9  # Use SSH action to deploy the app
