@@ -3,58 +3,117 @@ name: Deploy Flask App to EC2
 on:
   push:
     branches:
-      - main  # Trigger on push to the 'main' branch
+      - main
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest  # The job will run on Ubuntu hosted by GitHub
+    runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout the code from the GitHub repository
+      # 1. Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Set up Python environment for the Flask app
+      # 2. Set up Python
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
-          python-version: 3.10
+          python-version: '3.10'
 
       # 3. Install Python dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt  # Install dependencies listed in requirements.txt
+          pip install -r requirements.txt
 
-      # 4. Set up Terraform
+      # 4. Import secrets from Infisical
+      - name: Import Secrets from Infisical
+        uses: Infisical/secrets-action@v1.0.7
+        with:
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          project-id: ${{ secrets.INFISICAL_PROJECT_ID }}
+          environment: prod
+          secret-path: /
+
+      # 5. Set up Terraform
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.7.0  # Specify the Terraform version to use
+          terraform_version: 1.7.0
 
-      # 5. Initialize Terraform (set up backend, download providers)
+      # 6. Terraform Init
       - name: Terraform Init
-        working-directory: ./terraform  # Adjust to where your Terraform files are located
+        working-directory: ./terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
         run: terraform init -input=false
 
-      # 6. Apply Terraformform Apply
-        working-directory: ./terraform  # Same as above
-        run: |
-         terraform apply \
-           -auto-approve \
-           -input=false \
-           -var-file=c configuration to provision EC2
-      - name: Terrai.tfvars
+      # 7. Terraform Plan (Optional but recommended)
+      - name: Terraform Plan
+        working-directory: ./terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+        run: terraform plan -var-file=ci.tfvars -out=tfplan
 
-      # 7. Deploy Flask app to EC2 using SSH
+      # 8. Terraform Apply - FIXED: Single line, no backslashes
+      - name: Terraform Apply
+        working-directory: ./terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+        run: terraform apply -auto-approve -input=false tfplan
+
+      # 9. Get EC2 IP from Terraform output
+      - name: Get EC2 IP
+        id: get-ip
+        working-directory: ./terraform
+        run: |
+          EC2_IP=$(terraform output -raw ec2_public_ip)
+          echo "ec2_ip=$EC2_IP" >> $GITHUB_OUTPUT
+
+      # 10. Wait for EC2 to be ready
+      - name: Wait for EC2 to be ready
+        run: sleep 30
+
+      # 11. Deploy Flask app to EC2
       - name: Deploy Flask app to EC2
         uses: appleboy/ssh-action@v0.1.9
         with:
-          host: ${{ secrets.EC2_IP }}  # EC2 IP address stored in GitHub Secrets
-          username: ${{ secrets.EC2_USER }}  # EC2 username (typically 'ubuntu')
-          key: ${{ secrets.SSH_PRIVATE_KEY }}  # Private SSH key stored in GitHub Secrets
+          host: ${{ steps.get-ip.outputs.ec2_ip }}
+          username: ${{ env.EC2_USER }}
+          key: ${{ env.SSH_PRIVATE_KEY }}
           script: |
-            cd /home/ubuntu/flask-devops-ci  # Navigate to the Flask project folder on EC2
-            git pull origin main  # Pull the latest changes from GitHub
-            pkill -f app.py || true  # Stop any previous Flask process
-            nohup python3 app.py > app
+            # Update system and install dependencies
+            sudo apt-get update
+            sudo apt-get install -y python3-pip git
+            
+            # Clone or pull latest code
+            if [ -d "/home/ubuntu/flask-devops-ci" ]; then
+              cd /home/ubuntu/flask-devops-ci
+              git pull origin main
+            else
+              cd /home/ubuntu
+              git clone https://github.com/Shree0211/flask-devops-ci.git
+              cd flask-devops-ci
+            fi
+            
+            # Install Python dependencies
+            pip3 install -r requirements.txt
+            
+            # Stop any existing Flask process
+            pkill -f app.py || true
+            
+            # Start Flask app in background
+            nohup python3 app.py > app.log 2>&1 &
+            
+            # Verify app is running
+            sleep 5
+            if pgrep -f app.py > /dev/null; then
+              echo "Flask app started successfully"
+            else
+              echo "Failed to start Flask app"
+              exit 1
+            fi
