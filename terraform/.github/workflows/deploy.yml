@@ -26,47 +26,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4. Import secrets from Infisical
-      - name: Import Secrets from Infisical
-        uses: Infisical/secrets-action@v1.0.7
-        with:
-          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
-          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
-          project-id: ${{ secrets.INFISICAL_PROJECT_ID }}
-          environment: prod
-          secret-path: /
-
-      # 5. Set up Terraform
+      # 4. Set up Terraform
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.7.0
 
-      # 6. Terraform Init
+      # 5. Terraform Init
       - name: Terraform Init
         working-directory: ./terraform
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
         run: terraform init -input=false
 
-      # 7. Terraform Plan (Optional but recommended)
-      - name: Terraform Plan
-        working-directory: ./terraform
-        env:
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-        run: terraform plan -var-file=ci.tfvars -out=tfplan
-
-      # 8. Terraform Apply - FIXED: Single line, no backslashes
+      # 6. Terraform Apply
       - name: Terraform Apply
         working-directory: ./terraform
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-        run: terraform apply -auto-approve -input=false tfplan
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          TF_INPUT: false
+        run: terraform apply -auto-approve -var-file=ci.tfvars
+        timeout-minutes: 15
 
-      # 9. Get EC2 IP from Terraform output
+      # 7. Get EC2 IP from Terraform output
       - name: Get EC2 IP
         id: get-ip
         working-directory: ./terraform
@@ -74,17 +60,17 @@ jobs:
           EC2_IP=$(terraform output -raw ec2_public_ip)
           echo "ec2_ip=$EC2_IP" >> $GITHUB_OUTPUT
 
-      # 10. Wait for EC2 to be ready
+      # 8. Wait for EC2 to be ready
       - name: Wait for EC2 to be ready
         run: sleep 30
 
-      # 11. Deploy Flask app to EC2
+      # 9. Deploy Flask app to EC2
       - name: Deploy Flask app to EC2
         uses: appleboy/ssh-action@v0.1.9
         with:
           host: ${{ steps.get-ip.outputs.ec2_ip }}
-          username: ${{ env.EC2_USER }}
-          key: ${{ env.SSH_PRIVATE_KEY }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             # Update system and install dependencies
             sudo apt-get update
